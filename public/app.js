@@ -1,5 +1,5 @@
 // ===== KONFIGURASI API =====
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = 'https://madrasahku-topaz.vercel.app/';
 
 // ===== APP STATE =====
 let appData = {
