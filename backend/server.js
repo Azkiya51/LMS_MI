@@ -9,14 +9,13 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 
-// =============================================
-// GANTI DENGAN NILAI ASLI ANDA
-// =============================================
-const SUPABASE_URL = 'https://xxedhgsrelrzqukgwajm.supabase.co';      // ganti ini
-const SUPABASE_KEY = 'sb_publishable_6oAKljBLU2yq9m5neq8-NA_-d4_oAb3';  // ganti ini
-const JWT_SECRET   = '5d6a1edb5aaf0ef7e25d1fce7eed477e48e5769dcd8e021d5e99c12f0780d755';
-const PORT         = 3000;
-// =============================================
+// Taruh di baris PALING ATAS server.js
+require('dotenv').config();
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const JWT_SECRET   = process.env.JWT_SECRET;
+const PORT         = process.env.PORT || 3000;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 

@@ -1,12 +1,10 @@
 const bcrypt = require('bcrypt');
 const { createClient } = require('@supabase/supabase-js');
 
-// =============================================
-// GANTI DENGAN NILAI ASLI ANDA
-// =============================================
-const SUPABASE_URL = 'https://xxedhgsrelrzqukgwajm.supabase.co';       // ganti ini
-const SUPABASE_KEY = 'sb_publishable_6oAKljBLU2yq9m5neq8-NA_-d4_oAb3';   // ganti ini
-// =============================================
+require('dotenv').config();
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
