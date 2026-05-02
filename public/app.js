@@ -1,11 +1,21 @@
-// ===== KONFIGURASI API =====
-const API_BASE = 'https://madrasahku-topaz.vercel.app/api';
+// =============================================
+// app.js — MadrasahKu (Supabase Direct, tanpa server.js)
+// =============================================
+
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+
+// ===== KONFIGURASI SUPABASE =====
+// Ganti dengan nilai dari dashboard Supabase Anda
+// Settings → API → Project URL & anon public key
+const SUPABASE_URL  = 'https://xxedhgsrelrzqukgwajm.supabase.co';
+const SUPABASE_ANON = 'sb_publishable_6oAKljBLU2yq9m5neq8-NA_-d4_oAb3'; // anon/public key
+
+const db = createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ===== APP STATE =====
 let appData = {
   currentUser: null,
   currentRole: 'siswa',
-  token: null,
   materi: [],
   soalPretest: [],
   dataSiswa: []
@@ -16,24 +26,10 @@ let pretestState = {
 };
 
 // =============================================
-// HELPER: Fetch dengan Auth Token
-// =============================================
-async function apiFetch(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...options.headers };
-  if (appData.token) headers['Authorization'] = `Bearer ${appData.token}`;
-  const res = await fetch(API_BASE + path, { ...options, headers });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Terjadi kesalahan');
-  return json;
-}
-
-// =============================================
 // INIT
 // =============================================
 window.addEventListener('DOMContentLoaded', () => {
-  // Cek dulu apakah URL mengandung ?token= (link reset password)
   if (checkResetToken()) return;
-
   setTimeout(() => {
     document.getElementById('splash-screen').style.display = 'none';
     showPage('page-login');
@@ -50,23 +46,215 @@ function updateGreeting() {
   if (el) el.textContent = g + '!';
 }
 
+function updateTopbarDate() {
+  const el = document.getElementById('topbar-date');
+  if (!el) return;
+  el.textContent = new Date().toLocaleDateString('id-ID', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+}
+
+// =============================================
+// PAGE MANAGEMENT
+// =============================================
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
+  document.getElementById(id).classList.remove('hidden');
+}
+
+// =============================================
+// LOGIN — pakai tabel users + bcrypt di sisi client
+// Catatan: karena tidak ada server, password dicek
+// dengan membandingkan hash yang disimpan di Supabase.
+// Untuk keamanan lebih baik, gunakan Supabase Auth.
+// =============================================
+let selectedRole = 'siswa';
+function selectRole(role) {
+  selectedRole = role;
+  document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`[data-role="${role}"]`).classList.add('active');
+}
+
+async function doLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value.trim();
+  const errEl    = document.getElementById('login-error');
+  errEl.classList.add('hidden');
+
+  if (!username || !password) {
+    document.getElementById('login-error-msg').textContent = 'Username dan password harus diisi';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    // Ambil user dari tabel users
+    const { data: user, error } = await db
+      .from('users')
+      .select('*')
+      .eq('username', username)
+      .single();
+
+    if (error || !user) throw new Error('Username atau password salah');
+
+    // Verifikasi password menggunakan bcryptjs di browser
+    const bcrypt = await import('https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/+esm');
+    const valid  = await bcrypt.compare(password, user.password_hash);
+    if (!valid) throw new Error('Username atau password salah');
+
+    if (user.role !== selectedRole) {
+      throw new Error(`Akun ini adalah ${user.role}, bukan ${selectedRole}`);
+    }
+
+    appData.currentUser = { id: user.id, nama: user.nama, role: user.role, username: user.username };
+
+    if (user.role === 'siswa') {
+      document.getElementById('siswa-name-display').textContent = user.nama;
+      document.getElementById('hero-name').textContent = `Halo, ${user.nama}! 👋`;
+      showPage('app-siswa');
+      showSiswaSection('beranda');
+      updateGreeting();
+      loadBerandaStats();
+      loadProgressWidget();
+    } else {
+      document.getElementById('guru-name-display').textContent = user.nama;
+      document.getElementById('admin-welcome-name').textContent = `Selamat Datang, ${user.nama}! 👋`;
+      showPage('app-guru');
+      showAdminSection('dashboard');
+    }
+
+  } catch (err) {
+    document.getElementById('login-error-msg').textContent = err.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+function doLogout() {
+  clearProgressWidget();
+  appData.currentUser = null;
+  document.getElementById('login-username').value = '';
+  document.getElementById('login-password').value = '';
+  showPage('page-login');
+}
+
+function togglePw(inputId, btn) {
+  const input  = document.getElementById(inputId);
+  const isHide = input.type === 'password';
+  input.type   = isHide ? 'text' : 'password';
+  btn.innerHTML = isHide
+    ? '<i class="fas fa-eye-slash"></i>'
+    : '<i class="fas fa-eye"></i>';
+}
+
+// =============================================
+// LUPA PASSWORD — pakai Supabase Auth email reset
+// Catatan: user harus punya email di kolom 'email'
+// pada tabel users, dan menggunakan Supabase Auth.
+// Untuk sistem username/password custom, tampilkan
+// pesan agar hubungi admin.
+// =============================================
+function showModalLupa() {
+  document.getElementById('lupa-step-1').classList.remove('hidden');
+  document.getElementById('lupa-step-2').classList.add('hidden');
+  document.getElementById('lupa-error').classList.add('hidden');
+  document.getElementById('lupa-username').value = '';
+  const btn = document.getElementById('btn-lupa-kirim');
+  btn.disabled  = false;
+  btn.innerHTML = '<i class="fas fa-paper-plane"></i> Kirim Permintaan';
+  document.getElementById('modal-lupa').classList.remove('hidden');
+  setTimeout(() => document.getElementById('lupa-username').focus(), 100);
+}
+
+async function submitLupaPassword() {
+  const username = document.getElementById('lupa-username').value.trim();
+  const errEl    = document.getElementById('lupa-error');
+  errEl.classList.add('hidden');
+
+  if (!username) {
+    document.getElementById('lupa-error-msg').textContent = 'Username harus diisi!';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  const btn     = document.getElementById('btn-lupa-kirim');
+  btn.disabled  = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Memproses...';
+
+  try {
+    // Cek apakah username ada
+    const { data: user, error } = await db
+      .from('users')
+      .select('id, nama')
+      .eq('username', username)
+      .single();
+
+    if (error || !user) throw new Error('Username tidak ditemukan');
+
+    // Tampilkan pesan hubungi admin
+    document.getElementById('lupa-step-1').classList.add('hidden');
+    document.getElementById('lupa-step-2').classList.remove('hidden');
+
+    // Sembunyikan reset link box (tidak ada link)
+    const linkBox = document.getElementById('lupa-reset-link-box');
+    if (linkBox) linkBox.classList.add('hidden');
+
+    // Tampilkan pesan khusus
+    const step2 = document.getElementById('lupa-step-2');
+    step2.innerHTML = `
+      <div style="text-align:center;padding:1rem">
+        <div style="font-size:2rem;margin-bottom:0.5rem">📞</div>
+        <p><strong>Halo, ${user.nama}!</strong></p>
+        <p style="margin-top:0.5rem;color:#666">
+          Untuk reset password, silakan hubungi admin/guru Anda secara langsung.
+        </p>
+        <button class="btn-primary" style="margin-top:1rem"
+          onclick="document.getElementById('modal-lupa').classList.add('hidden')">
+          Tutup
+        </button>
+      </div>`;
+
+  } catch (err) {
+    document.getElementById('lupa-error-msg').textContent = err.message;
+    errEl.classList.remove('hidden');
+    btn.disabled  = false;
+    btn.innerHTML = '<i class="fas fa-paper-plane"></i> Kirim Permintaan';
+  }
+}
+
+// =============================================
+// RESET PASSWORD — guru bisa ganti password siswa
+// =============================================
+function checkResetToken() {
+  // Tidak ada token-based reset tanpa backend
+  // Fitur ini dinonaktifkan
+  return false;
+}
+
+function goToLogin() {
+  showPage('page-login');
+}
+
 // =============================================
 // BERANDA STATS
 // =============================================
 async function loadBerandaStats() {
   try {
-    const [materi, soal] = await Promise.all([
-      apiFetch('/materi'),
-      apiFetch('/soal')
+    const [{ count: materiCount }, { count: soalCount }] = await Promise.all([
+      db.from('materi').select('*', { count: 'exact', head: true }),
+      db.from('soal_pretest').select('*', { count: 'exact', head: true })
     ]);
+
     const elMateri = document.getElementById('hero-stat-materi');
     const elSoal   = document.getElementById('hero-stat-soal');
-    if (elMateri) elMateri.textContent = materi.length;
-    if (elSoal)   elSoal.textContent   = soal.length;
+    if (elMateri) elMateri.textContent = materiCount || 0;
+    if (elSoal)   elSoal.textContent   = soalCount   || 0;
+
+    // Hitung per kelas
+    const { data: materiList } = await db.from('materi').select('kelas');
     for (let k = 1; k <= 6; k++) {
-      const count = materi.filter(m => m.kelas === k || m.kelas === String(k)).length;
+      const count = (materiList || []).filter(m => String(m.kelas) === String(k)).length;
       const el = document.getElementById(`count-kelas-${k}`);
-      if (el) el.textContent = count > 0 ? count : '0';
+      if (el) el.textContent = count;
     }
   } catch (err) {
     for (let k = 1; k <= 6; k++) {
@@ -81,15 +269,22 @@ async function loadBerandaStats() {
 // =============================================
 async function loadProfilSekolah() {
   try {
-    const profil = await apiFetch('/profil');
+    const { data, error } = await db
+      .from('profil_sekolah')
+      .select('*')
+      .eq('id', 1)
+      .single();
+
+    if (error) throw error;
+
+    const profil = {
+      ...data,
+      misi: data.misi ? data.misi.split('\n').filter(Boolean) : [],
+      fasilitas: data.fasilitas ? data.fasilitas.split(',').map(f => f.trim()) : []
+    };
     renderProfilSekolah(profil);
   } catch (err) {
-    try {
-      const profil = await apiFetch('/sekolah');
-      renderProfilSekolah(profil);
-    } catch (err2) {
-      console.warn('Endpoint profil tidak tersedia:', err2.message);
-    }
+    console.warn('Profil sekolah belum diisi:', err.message);
   }
 }
 
@@ -118,9 +313,9 @@ function renderProfilSekolah(p) {
     misiEl.innerHTML = misiArr.map(m => `<li>${m}</li>`).join('');
   }
   setId('profil-stat-siswa',    p.jumlah_siswa  || p.stat_siswa);
-  setId('profil-stat-guru',     p.jumlah_guru   || p.tenaga_pendidik || p.stat_guru);
-  setId('profil-stat-kelas',    p.jumlah_kelas  || p.ruang_kelas     || p.stat_kelas);
-  setId('profil-stat-prestasi', p.prestasi      || p.jumlah_prestasi  || p.stat_prestasi);
+  setId('profil-stat-guru',     p.jumlah_guru   || p.stat_guru);
+  setId('profil-stat-kelas',    p.jumlah_kelas  || p.stat_kelas);
+  setId('profil-stat-prestasi', p.prestasi      || p.stat_prestasi);
   const fasEl = document.getElementById('profil-fasilitas-grid');
   if (fasEl && p.fasilitas && Array.isArray(p.fasilitas) && p.fasilitas.length > 0) {
     const icons = {
@@ -136,241 +331,6 @@ function renderProfilSekolah(p) {
   }
 }
 
-function updateTopbarDate() {
-  const el = document.getElementById('topbar-date');
-  if (!el) return;
-  el.textContent = new Date().toLocaleDateString('id-ID', {
-    weekday:'long', year:'numeric', month:'long', day:'numeric'
-  });
-}
-
-// =============================================
-// PAGE MANAGEMENT
-// =============================================
-function showPage(id) {
-  document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
-  document.getElementById(id).classList.remove('hidden');
-}
-
-// =============================================
-// LOGIN
-// =============================================
-let selectedRole = 'siswa';
-function selectRole(role) {
-  selectedRole = role;
-  document.querySelectorAll('.role-btn').forEach(b => b.classList.remove('active'));
-  document.querySelector(`[data-role="${role}"]`).classList.add('active');
-}
-
-async function doLogin() {
-  const username = document.getElementById('login-username').value.trim();
-  const password = document.getElementById('login-password').value.trim();
-  const errEl    = document.getElementById('login-error');
-  errEl.classList.add('hidden');
-
-  try {
-    const res = await apiFetch('/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password })
-    });
-    if (res.user.role !== selectedRole) {
-      document.getElementById('login-error-msg').textContent =
-        `Akun ini adalah ${res.user.role}, bukan ${selectedRole}`;
-      errEl.classList.remove('hidden');
-      return;
-    }
-    appData.token       = res.token;
-    appData.currentUser = res.user;
-
-    if (res.user.role === 'siswa') {
-      document.getElementById('siswa-name-display').textContent = res.user.nama;
-      document.getElementById('hero-name').textContent = `Halo, ${res.user.nama}! 👋`;
-      showPage('app-siswa');
-      showSiswaSection('beranda');
-      updateGreeting();
-      loadBerandaStats();
-      loadProgressWidget();       // ← progress tracking
-    } else {
-      document.getElementById('guru-name-display').textContent = res.user.nama;
-      document.getElementById('admin-welcome-name').textContent = `Selamat Datang, ${res.user.nama}! 👋`;
-      showPage('app-guru');
-      showAdminSection('dashboard');
-    }
-  } catch (err) {
-    document.getElementById('login-error-msg').textContent = err.message;
-    errEl.classList.remove('hidden');
-  }
-}
-
-function doLogout() {
-  clearProgressWidget();          // ← bersihkan widget
-  appData.currentUser = null;
-  appData.token       = null;
-  document.getElementById('login-username').value = '';
-  document.getElementById('login-password').value = '';
-  showPage('page-login');
-}
-
-// =============================================
-// TOGGLE SHOW / HIDE PASSWORD
-// =============================================
-function togglePw(inputId, btn) {
-  const input  = document.getElementById(inputId);
-  const isHide = input.type === 'password';
-  input.type   = isHide ? 'text' : 'password';
-  btn.innerHTML = isHide
-    ? '<i class="fas fa-eye-slash"></i>'
-    : '<i class="fas fa-eye"></i>';
-}
-
-// =============================================
-// LUPA PASSWORD — Step 1 (request token)
-// =============================================
-function showModalLupa() {
-  // Reset ke step 1
-  document.getElementById('lupa-step-1').classList.remove('hidden');
-  document.getElementById('lupa-step-2').classList.add('hidden');
-  document.getElementById('lupa-error').classList.add('hidden');
-  document.getElementById('lupa-username').value = '';
-  const btn = document.getElementById('btn-lupa-kirim');
-  btn.disabled  = false;
-  btn.innerHTML = '<i class="fas fa-paper-plane"></i> Kirim Permintaan';
-  document.getElementById('modal-lupa').classList.remove('hidden');
-  setTimeout(() => document.getElementById('lupa-username').focus(), 100);
-}
-
-async function submitLupaPassword() {
-  const username = document.getElementById('lupa-username').value.trim();
-  const errEl    = document.getElementById('lupa-error');
-  errEl.classList.add('hidden');
-
-  if (!username) {
-    document.getElementById('lupa-error-msg').textContent = 'Username harus diisi!';
-    errEl.classList.remove('hidden');
-    return;
-  }
-
-  const btn     = document.getElementById('btn-lupa-kirim');
-  btn.disabled  = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Memproses...';
-
-  try {
-    const res = await apiFetch('/auth/lupa-password', {
-      method: 'POST',
-      body  : JSON.stringify({ username })
-    });
-
-    // Tampilkan step 2 sukses
-    document.getElementById('lupa-step-1').classList.add('hidden');
-    document.getElementById('lupa-step-2').classList.remove('hidden');
-
-    // Jika server kembalikan resetUrl (mode dev), tampilkan di UI
-    if (res.resetUrl) {
-      document.getElementById('lupa-reset-url').textContent  = res.resetUrl;
-      document.getElementById('lupa-reset-link-box').classList.remove('hidden');
-      window._lupaResetUrl = res.resetUrl;
-    }
-
-  } catch (err) {
-    document.getElementById('lupa-error-msg').textContent = err.message;
-    errEl.classList.remove('hidden');
-    btn.disabled  = false;
-    btn.innerHTML = '<i class="fas fa-paper-plane"></i> Kirim Permintaan';
-  }
-}
-
-function copyResetLink() {
-  const url = window._lupaResetUrl;
-  if (!url) return;
-  navigator.clipboard.writeText(url).then(() => {
-    showToast('✅ Link berhasil disalin!');
-  }).catch(() => {
-    // Fallback manual
-    const el       = document.createElement('textarea');
-    el.value       = url;
-    el.style.position = 'fixed';
-    el.style.opacity  = '0';
-    document.body.appendChild(el);
-    el.select();
-    document.execCommand('copy');
-    document.body.removeChild(el);
-    showToast('✅ Link berhasil disalin!');
-  });
-}
-
-// =============================================
-// RESET PASSWORD — dari link ?token= di URL
-// =============================================
-function checkResetToken() {
-  const params = new URLSearchParams(window.location.search);
-  const token  = params.get('token');
-  if (!token) return false;
-
-  // Simpan token di memory
-  window._resetToken = token;
-
-  // Langsung ke halaman reset, bypass splash
-  document.getElementById('splash-screen').style.display = 'none';
-  showPage('page-reset');
-
-  // Bersihkan token dari URL (supaya tidak bisa di-refresh ulang)
-  window.history.replaceState({}, document.title, window.location.pathname);
-  return true;
-}
-
-async function submitResetPassword() {
-  const pw1   = document.getElementById('reset-pw1').value;
-  const pw2   = document.getElementById('reset-pw2').value;
-  const errEl = document.getElementById('reset-error');
-  errEl.classList.add('hidden');
-
-  if (pw1.length < 6) {
-    document.getElementById('reset-error-msg').textContent = 'Kata sandi minimal 6 karakter!';
-    errEl.classList.remove('hidden');
-    return;
-  }
-  if (pw1 !== pw2) {
-    document.getElementById('reset-error-msg').textContent = 'Kata sandi tidak cocok!';
-    errEl.classList.remove('hidden');
-    return;
-  }
-
-  const btn     = document.getElementById('btn-reset-submit');
-  btn.disabled  = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Menyimpan...';
-
-  try {
-    await apiFetch('/auth/reset-password', {
-      method: 'POST',
-      body  : JSON.stringify({ token: window._resetToken, newPassword: pw1 })
-    });
-
-    document.getElementById('reset-form-wrap').classList.add('hidden');
-    document.getElementById('reset-success-wrap').classList.remove('hidden');
-
-  } catch (err) {
-    // Jika token expired/invalid, tampilkan halaman error khusus
-    if (err.message.includes('kadaluarsa') || err.message.includes('tidak valid')) {
-      document.getElementById('reset-form-wrap').classList.add('hidden');
-      document.getElementById('reset-invalid-wrap').classList.remove('hidden');
-    } else {
-      document.getElementById('reset-error-msg').textContent = err.message;
-      errEl.classList.remove('hidden');
-      btn.disabled  = false;
-      btn.innerHTML = '<i class="fas fa-save"></i> Simpan Kata Sandi Baru';
-    }
-  }
-}
-
-function goToLogin() {
-  document.getElementById('reset-form-wrap').classList.remove('hidden');
-  document.getElementById('reset-success-wrap').classList.add('hidden');
-  document.getElementById('reset-invalid-wrap').classList.add('hidden');
-  document.getElementById('reset-pw1').value = '';
-  document.getElementById('reset-pw2').value = '';
-  showPage('page-login');
-}
-
 // =============================================
 // SISWA NAVIGATION
 // =============================================
@@ -378,14 +338,14 @@ function showSiswaSection(name) {
   document.querySelectorAll('.siswa-section').forEach(s => s.classList.add('hidden'));
   document.getElementById(`sec-${name}`).classList.remove('hidden');
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  const mapping = { beranda:0, materi:1, pretest:2, 'profil-sekolah':3 };
+  const mapping = { beranda: 0, materi: 1, pretest: 2, 'profil-sekolah': 3 };
   const items   = document.querySelectorAll('.nav-item');
   if (items[mapping[name]]) items[mapping[name]].classList.add('active');
   if (name === 'materi')         filterKelas(1);
   if (name === 'pretest')        loadPretestSoal();
   if (name === 'profil-sekolah') loadProfilSekolah();
   if (name === 'beranda')        loadProgressWidget();
-  window.scrollTo({ top:0, behavior:'smooth' });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function toggleMobileNav() {
@@ -393,7 +353,7 @@ function toggleMobileNav() {
 }
 
 // =============================================
-// PROGRESS TRACKING — localStorage engine
+// PROGRESS TRACKING — localStorage
 // =============================================
 function _pgKey(suffix) {
   const u = appData.currentUser?.username || appData.currentUser?.nama || 'guest';
@@ -414,19 +374,15 @@ function markBahanDibuka(materiId, bahanUrl) {
     }
   } catch(e) {}
 }
-function isMateriDibuka(materiId) {
-  return localStorage.getItem(_pgKey(`materi:${materiId}`)) === 'true';
-}
-function isMateriSelesai(materiId) {
-  return localStorage.getItem(_pgKey(`selesai:${materiId}`)) === 'true';
-}
+function isMateriDibuka(materiId)  { return localStorage.getItem(_pgKey(`materi:${materiId}`)) === 'true'; }
+function isMateriSelesai(materiId) { return localStorage.getItem(_pgKey(`selesai:${materiId}`)) === 'true'; }
 function isBahanDibuka(materiId, bahanUrl) {
   return localStorage.getItem(_pgKey(`bahan:${materiId}:${bahanUrl || '#'}`)) === 'true';
 }
 function getProgressKelas(kelas, semua) {
   const items   = semua.filter(m => String(m.kelas) === String(kelas));
   const total   = items.length;
-  if (!total) return { total:0, selesai:0, pct:0 };
+  if (!total) return { total: 0, selesai: 0, pct: 0 };
   const selesai = items.filter(m => isMateriSelesai(m.id)).length;
   return { total, selesai, pct: Math.round((selesai / total) * 100) };
 }
@@ -439,7 +395,7 @@ async function loadProgressWidget() {
   if (!el) return;
   el.innerHTML = '<div class="pg-loading">⏳ Memuat progress...</div>';
   try {
-    const semua = await apiFetch('/materi');
+    const semua = await _getMateri();
     const total   = semua.length;
     const selesai = semua.filter(m => isMateriSelesai(m.id)).length;
     const pct     = total > 0 ? Math.round((selesai / total) * 100) : 0;
@@ -463,9 +419,9 @@ async function loadProgressWidget() {
         </div>`;
     }).join('');
 
-    const ringColor   = pct >= 80 ? '#2ED573' : pct >= 40 ? '#FF8C42' : '#1E90FF';
+    const ringColor     = pct >= 80 ? '#2ED573' : pct >= 40 ? '#FF8C42' : '#1E90FF';
     const circumference = 2 * Math.PI * 30;
-    const offset      = circumference - (pct / 100) * circumference;
+    const offset        = circumference - (pct / 100) * circumference;
 
     el.innerHTML = `
       <div class="pg-widget">
@@ -506,6 +462,35 @@ function confirmResetProgress() {
 }
 
 // =============================================
+// HELPER — ambil materi dari Supabase
+// =============================================
+async function _getMateri(kelas = null, mapel = null) {
+  let query = db
+    .from('materi')
+    .select('*, bahan_materi(*)')
+    .order('id');
+  if (kelas) query = query.eq('kelas', kelas);
+  if (mapel) query = query.eq('mapel', mapel);
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  return (data || []).map(m => ({
+    id:    m.id,
+    kelas: m.kelas,
+    mapel: m.mapel,
+    judul: m.judul,
+    desc:  m.deskripsi,
+    icon:  m.icon,
+    bahan: (m.bahan_materi || []).map(b => ({
+      type: b.type,
+      name: b.nama,
+      url:  b.url
+    }))
+  }));
+}
+
+// =============================================
 // MATERI
 // =============================================
 let currentKelas = 1;
@@ -527,8 +512,7 @@ async function filterKelas(kelas) {
   const grid = document.getElementById('materi-grid');
   grid.innerHTML = '<div class="loading-state">⏳ Memuat materi...</div>';
   try {
-    const materi = await apiFetch(`/materi?kelas=${kelas}`);
-    appData.materi = materi;
+    appData.materi = await _getMateri(kelas);
     renderMateriCards(kelas);
   } catch (err) {
     grid.innerHTML = `<div class="error-state">❌ Gagal memuat: ${err.message}</div>`;
@@ -548,11 +532,9 @@ function renderMateriCards(kelas) {
     const vidCount = m.bahan.filter(b => b.type === 'video').length;
     const selesai  = isMateriSelesai(m.id);
     const dibuka   = isMateriDibuka(m.id);
-
     let statusBadge = '';
     if (selesai)     statusBadge = '<span class="mc-status-badge mc-done"><i class="fas fa-check-circle"></i> Selesai</span>';
     else if (dibuka) statusBadge = '<span class="mc-status-badge mc-ongoing"><i class="fas fa-clock"></i> Sedang Dibaca</span>';
-
     return `
     <div class="materi-card ${selesai ? 'materi-card-done' : ''}" onclick="openDetailMateri(${m.id})">
       <div class="mc-top">
@@ -573,9 +555,7 @@ function renderMateriCards(kelas) {
 function openDetailMateri(id) {
   const m = appData.materi.find(x => x.id === id);
   if (!m) return;
-
-  markMateriDibuka(id);   // tandai sudah dibuka
-
+  markMateriDibuka(id);
   document.getElementById('materi-grid').classList.add('hidden');
   const d = document.getElementById('detail-materi');
   d.classList.remove('hidden');
@@ -585,11 +565,7 @@ function openDetailMateri(id) {
   document.getElementById('detail-kelas-badge').textContent = `Kelas ${m.kelas}`;
   document.getElementById('detail-mapel-badge').textContent = m.mapel;
   document.getElementById('detail-desc').textContent        = m.desc;
-
-  // Progress bar bahan
   _renderDetailProgressBar(m);
-
-  // Daftar bahan dengan status sudah/belum
   const bahanEl = document.getElementById('bahan-list');
   bahanEl.innerHTML = m.bahan.map(b => {
     const icon      = b.type === 'pdf' ? '📄' : '▶️';
@@ -597,7 +573,6 @@ function openDetailMateri(id) {
     const btnLabel  = b.type === 'pdf' ? 'Buka PDF'   : 'Tonton Video';
     const sudah     = isBahanDibuka(m.id, b.url || '#');
     const safeUrl   = (b.url || '#').replace(/'/g, "\\'");
-
     return `
     <div class="bahan-item ${sudah ? 'bahan-sudah' : ''}" id="bi-${m.id}-${_safeId(b.url)}">
       <div class="bahan-type-icon">${icon}</div>
@@ -614,12 +589,10 @@ function openDetailMateri(id) {
   }).join('');
 }
 
-function _safeId(url) {
-  return (url || '#').replace(/[^a-zA-Z0-9]/g, '_');
-}
+function _safeId(url) { return (url || '#').replace(/[^a-zA-Z0-9]/g, '_'); }
 
 function _renderDetailProgressBar(m) {
-  const pgBar  = document.getElementById('detail-progress-bar');
+  const pgBar = document.getElementById('detail-progress-bar');
   if (!pgBar) return;
   const selesai = isMateriSelesai(m.id);
   const dibuka  = m.bahan.filter(b => isBahanDibuka(m.id, b.url || '#')).length;
@@ -639,8 +612,6 @@ function _renderDetailProgressBar(m) {
 function openBahan(url, type, name, materiId) {
   if (materiId) {
     markBahanDibuka(materiId, url);
-
-    // Update item bahan tanpa reload
     const itemEl = document.getElementById(`bi-${materiId}-${_safeId(url)}`);
     if (itemEl) {
       itemEl.classList.add('bahan-sudah');
@@ -652,12 +623,8 @@ function openBahan(url, type, name, materiId) {
       }
       itemEl.querySelector('.bahan-open-btn').classList.add('bahan-open-done');
     }
-
-    // Refresh progress bar detail
     const m = appData.materi.find(x => x.id === materiId);
     if (m) _renderDetailProgressBar(m);
-
-    // Refresh widget beranda
     loadProgressWidget();
   }
   if (url === '#') {
@@ -683,7 +650,21 @@ async function loadPretestSoal() {
   const prev  = document.getElementById('pretest-preview');
   prev.innerHTML = '<div class="pretest-loading">⏳ Memuat soal...</div>';
   try {
-    const soal = await apiFetch(`/soal?kelas=${kelas}&mapel=${encodeURIComponent(mapel)}`);
+    const { data, error } = await db
+      .from('soal_pretest')
+      .select('*')
+      .eq('kelas', kelas)
+      .eq('mapel', mapel)
+      .order('id');
+    if (error) throw error;
+
+    const soal = (data || []).map(s => ({
+      id: s.id, kelas: s.kelas, mapel: s.mapel,
+      pertanyaan: s.pertanyaan,
+      a: s.opsi_a, b: s.opsi_b, c: s.opsi_c, d: s.opsi_d,
+      jawaban: s.jawaban
+    }));
+
     appData.soalPretest = soal;
     if (soal.length === 0) {
       prev.innerHTML = `<div class="pretest-empty"><i class="fas fa-info-circle"></i> Belum ada soal untuk Kelas ${kelas} - ${mapel}</div>`;
@@ -700,7 +681,7 @@ function startPretest() {
   const mapel = document.getElementById('pt-mapel-sel').value;
   const soal  = appData.soalPretest.filter(s => s.kelas === kelas && s.mapel === mapel);
   if (soal.length === 0) { showToast('⚠️ Tidak ada soal!'); return; }
-  pretestState = { soalList:soal, currentIndex:0, answers:{}, kelas, mapel };
+  pretestState = { soalList: soal, currentIndex: 0, answers: {}, kelas, mapel };
   document.getElementById('pretest-selector').classList.add('hidden');
   document.getElementById('pretest-soal').classList.remove('hidden');
   renderSoal();
@@ -710,12 +691,10 @@ function renderSoal() {
   const { soalList, currentIndex } = pretestState;
   const s     = soalList[currentIndex];
   const total = soalList.length;
-
   document.getElementById('pt-soal-counter').textContent = `Soal ${currentIndex + 1} / ${total}`;
   document.getElementById('soal-number').textContent     = `Soal ${currentIndex + 1}`;
   document.getElementById('soal-text').textContent       = s.pertanyaan;
   document.getElementById('pt-progress-fill').style.width = `${((currentIndex + 1) / total) * 100}%`;
-
   const opts   = ['A','B','C','D'];
   const labels = [s.a, s.b, s.c, s.d];
   document.getElementById('soal-options').innerHTML = opts.map((opt, i) => `
@@ -723,7 +702,6 @@ function renderSoal() {
       onclick="pilihJawaban('${opt}', this)">
       <span class="opt-label">${opt}</span> ${labels[i]}
     </button>`).join('');
-
   document.getElementById('btn-prev').disabled = currentIndex === 0;
   const isLast = currentIndex === total - 1;
   document.getElementById('btn-next').classList.toggle('hidden', isLast);
@@ -751,7 +729,7 @@ async function submitPretest() {
   const { soalList, answers, kelas, mapel } = pretestState;
   let benar = 0, skip = 0;
   soalList.forEach(s => {
-    if (!answers[s.id])                    skip++;
+    if (!answers[s.id])                   skip++;
     else if (answers[s.id] === s.jawaban) benar++;
   });
   const salah = soalList.length - benar - skip;
@@ -761,45 +739,33 @@ async function submitPretest() {
   document.getElementById('pretest-hasil').classList.remove('hidden');
 
   let icon, title, fb, fbClass;
-  if (nilai >= 80) {
-    icon='🏆'; title='Luar Biasa!';
-    fb='Nilai kamu sangat bagus! Terus belajar ya!'; fbClass='feedback-success';
-  } else if (nilai >= 60) {
-    icon='⭐'; title='Bagus!';
-    fb='Nilai kamu sudah lumayan. Perlu sedikit lagi belajar!'; fbClass='feedback-warning';
-  } else {
-    icon='💪'; title='Semangat!';
-    fb='Nilai kamu perlu ditingkatkan. Baca materi dulu ya!'; fbClass='feedback-danger';
-  }
+  if (nilai >= 80)      { icon='🏆'; title='Luar Biasa!'; fb='Nilai kamu sangat bagus! Terus belajar ya!'; fbClass='feedback-success'; }
+  else if (nilai >= 60) { icon='⭐'; title='Bagus!'; fb='Nilai kamu sudah lumayan. Perlu sedikit lagi belajar!'; fbClass='feedback-warning'; }
+  else                  { icon='💪'; title='Semangat!'; fb='Nilai kamu perlu ditingkatkan. Baca materi dulu ya!'; fbClass='feedback-danger'; }
 
-  document.getElementById('hasil-icon').textContent  = icon;
-  document.getElementById('hasil-title').textContent = title;
+  document.getElementById('hasil-icon').textContent   = icon;
+  document.getElementById('hasil-title').textContent  = title;
   document.getElementById('hasil-detail').textContent = `${benar} benar dari ${soalList.length} soal`;
   const fbEl = document.getElementById('hasil-feedback');
   fbEl.textContent = fb; fbEl.className = `hasil-feedback ${fbClass}`;
-
   document.getElementById('hs-benar').textContent = benar;
   document.getElementById('hs-salah').textContent = salah;
   document.getElementById('hs-skip').textContent  = skip;
-
   animateSkorRing(nilai);
   animateNilai(nilai);
-
-  // Reset state pembahasan
   document.getElementById('pembahasan-list').classList.add('hidden');
   document.getElementById('btn-toggle-pembahasan').innerHTML =
     '<i class="fas fa-book-open"></i> Lihat Pembahasan Soal ' +
     '<i class="fas fa-chevron-down toggle-chevron" id="toggle-chevron"></i>';
-
   renderPembahasan(soalList, answers);
 
+  // Simpan hasil ke Supabase
   try {
-    await apiFetch('/hasil', {
-      method: 'POST',
-      body: JSON.stringify({
-        nama_siswa: appData.currentUser?.nama || 'Anonim',
-        kelas, mapel, nilai, jumlah_benar:benar, jumlah_soal:soalList.length
-      })
+    await db.from('hasil_pretest').insert({
+      nama_siswa:    appData.currentUser?.nama || 'Anonim',
+      kelas, mapel, nilai,
+      jumlah_benar:  benar,
+      jumlah_soal:   soalList.length
     });
   } catch (err) { console.warn('Gagal simpan hasil:', err.message); }
 }
@@ -846,10 +812,9 @@ function renderPembahasan(soalList, answers) {
     const benar    = jawabanSiswa === s.jawaban;
     const dilewati = !jawabanSiswa;
     let statusClass, statusLabel, statusIcon;
-    if (dilewati)      { statusClass='pb-skip';  statusLabel='Dilewati'; statusIcon='fas fa-minus-circle'; }
-    else if (benar)    { statusClass='pb-benar'; statusLabel='Benar';    statusIcon='fas fa-check-circle'; }
-    else               { statusClass='pb-salah'; statusLabel='Salah';    statusIcon='fas fa-times-circle'; }
-
+    if (dilewati)   { statusClass='pb-skip';  statusLabel='Dilewati'; statusIcon='fas fa-minus-circle'; }
+    else if (benar) { statusClass='pb-benar'; statusLabel='Benar';    statusIcon='fas fa-check-circle'; }
+    else            { statusClass='pb-salah'; statusLabel='Salah';    statusIcon='fas fa-times-circle'; }
     const pilihanHTML = ['A','B','C','D'].map(opt => {
       const text      = s[opt.toLowerCase()];
       const isJawaban = opt === s.jawaban;
@@ -868,7 +833,6 @@ function renderPembahasan(soalList, answers) {
           ${isDipilih ? '<span class="pb-dipilih-tag">Jawabanmu</span>' : ''}
         </div>`;
     }).join('');
-
     return `
       <div class="pembahasan-card ${statusClass}-card">
         <div class="pb-card-header">
@@ -906,7 +870,7 @@ function showAdminSection(name) {
   document.querySelectorAll('.admin-section').forEach(s => s.classList.add('hidden'));
   document.getElementById(`admin-${name}`).classList.remove('hidden');
   document.querySelectorAll('.sb-item').forEach(s => s.classList.remove('active'));
-  const mapping = { 'dashboard':0, 'kelola-materi':1, 'kelola-pretest':2, 'data-siswa':3 };
+  const mapping = { 'dashboard':0,'kelola-materi':1,'kelola-pretest':2,'data-siswa':3 };
   const items   = document.querySelectorAll('.sb-item');
   if (items[mapping[name]]) items[mapping[name]].classList.add('active');
   const titles = { 'dashboard':'Dashboard','kelola-materi':'Kelola Materi','kelola-pretest':'Kelola Pretest','data-siswa':'Data Siswa' };
@@ -922,20 +886,32 @@ function toggleSidebar() {
 }
 
 // =============================================
-// DASHBOARD
+// DASHBOARD ADMIN
 // =============================================
 async function loadDashboard() {
   try {
-    const [materi, soal, siswa] = await Promise.all([
-      apiFetch('/materi'), apiFetch('/soal'), apiFetch('/siswa')
+    const [
+      { count: materiCount },
+      { count: soalCount },
+      { count: siswaCount },
+      { data: siswaList }
+    ] = await Promise.all([
+      db.from('materi').select('*', { count: 'exact', head: true }),
+      db.from('soal_pretest').select('*', { count: 'exact', head: true }),
+      db.from('siswa').select('*', { count: 'exact', head: true }),
+      db.from('siswa').select('kelas')
     ]);
-    document.getElementById('stat-materi').textContent = materi.length;
-    document.getElementById('stat-soal').textContent   = soal.length;
-    document.getElementById('stat-siswa').textContent  = siswa.length;
-    document.getElementById('stat-kelas').textContent  = new Set(siswa.map(s => s.kelas)).size || 6;
+
+    document.getElementById('stat-materi').textContent = materiCount || 0;
+    document.getElementById('stat-soal').textContent   = soalCount   || 0;
+    document.getElementById('stat-siswa').textContent  = siswaCount  || 0;
+    document.getElementById('stat-kelas').textContent  = new Set((siswaList || []).map(s => s.kelas)).size || 6;
+
+    const { data: materiList } = await db
+      .from('materi').select('id, judul, kelas, mapel, icon').order('id', { ascending: false }).limit(5);
     const el = document.getElementById('recent-materi-list');
-    if (el) {
-      el.innerHTML = materi.slice(-5).reverse().map(m => `
+    if (el && materiList) {
+      el.innerHTML = materiList.map(m => `
         <div class="recent-materi-item">
           <div class="rmi-icon">${m.icon}</div>
           <div><div class="rmi-name">${m.judul}</div><div class="rmi-meta">Kelas ${m.kelas} • ${m.mapel}</div></div>
@@ -965,13 +941,9 @@ function switchMapelMateri(mapel) {
 async function loadAndRenderMateriTable() {
   const infoEl = document.getElementById('materi-info-text');
   if (infoEl) infoEl.textContent = '⏳ Memuat materi...';
-  let url = '/materi';
-  const params = [];
-  if (activeKelasMateri && activeKelasMateri !== '0') params.push(`kelas=${activeKelasMateri}`);
-  if (activeMapelMateri) params.push(`mapel=${encodeURIComponent(activeMapelMateri)}`);
-  if (params.length) url += '?' + params.join('&');
   try {
-    const list = await apiFetch(url);
+    const kelas = (activeKelasMateri && activeKelasMateri !== '0') ? activeKelasMateri : null;
+    const list  = await _getMateri(kelas, activeMapelMateri || null);
     appData.materi = list;
     renderMateriAdminCards(list);
     const kelasLabel = activeKelasMateri === '0' ? 'Semua Kelas' : `Kelas ${activeKelasMateri}`;
@@ -1061,6 +1033,7 @@ async function saveMateri() {
   const mapel = document.getElementById('m-mapel').value;
   const desc  = document.getElementById('m-desc').value.trim();
   if (!judul) { showToast('⚠️ Judul materi harus diisi!'); return; }
+
   const bahanRows = document.querySelectorAll('#bahan-items .bahan-input-row');
   const bahan = [];
   bahanRows.forEach(row => {
@@ -1069,14 +1042,40 @@ async function saveMateri() {
     const url  = row.querySelector('.bahan-url-input').value.trim() || '#';
     if (name) bahan.push({ type, name, url });
   });
+
   const icons  = { 1:'🌱',2:'🌿',3:'🌳',4:'⭐',5:'🌟',6:'🏆' };
   const editId = document.getElementById('edit-materi-id').value;
+
   try {
     if (editId) {
-      await apiFetch(`/materi/${editId}`, { method:'PUT', body:JSON.stringify({ judul,kelas,mapel,desc,icon:icons[kelas],bahan }) });
+      // Update materi
+      const { error } = await db.from('materi').update({
+        judul, kelas, mapel, deskripsi: desc, icon: icons[kelas], updated_at: new Date()
+      }).eq('id', editId);
+      if (error) throw error;
+
+      // Update bahan: hapus lama, insert baru
+      await db.from('bahan_materi').delete().eq('materi_id', editId);
+      if (bahan.length > 0) {
+        const { error: bahanErr } = await db.from('bahan_materi').insert(
+          bahan.map((b, i) => ({ materi_id: parseInt(editId), type: b.type, nama: b.name, url: b.url, urutan: i }))
+        );
+        if (bahanErr) throw bahanErr;
+      }
       showToast('✅ Materi berhasil diperbarui!');
     } else {
-      await apiFetch('/materi', { method:'POST', body:JSON.stringify({ judul,kelas,mapel,desc,icon:icons[kelas],bahan }) });
+      // Insert materi baru
+      const { data: newMateri, error } = await db.from('materi').insert({
+        judul, kelas, mapel, deskripsi: desc, icon: icons[kelas]
+      }).select().single();
+      if (error) throw error;
+
+      if (bahan.length > 0) {
+        const { error: bahanErr } = await db.from('bahan_materi').insert(
+          bahan.map((b, i) => ({ materi_id: newMateri.id, type: b.type, nama: b.name, url: b.url, urutan: i }))
+        );
+        if (bahanErr) throw bahanErr;
+      }
       showToast('✅ Materi berhasil ditambahkan!');
     }
     closeModal('modal-materi');
@@ -1086,7 +1085,9 @@ async function saveMateri() {
 async function deleteMateri(id) {
   if (!confirm('Yakin ingin menghapus materi ini?')) return;
   try {
-    await apiFetch(`/materi/${id}`, { method:'DELETE' });
+    await db.from('bahan_materi').delete().eq('materi_id', id);
+    const { error } = await db.from('materi').delete().eq('id', id);
+    if (error) throw error;
     showToast('🗑️ Materi berhasil dihapus!');
     loadAndRenderMateriTable();
   } catch (err) { showToast('❌ ' + err.message); }
@@ -1114,7 +1115,19 @@ async function loadAndRenderSoalTable() {
   const infoEl = document.getElementById('pretest-info-text');
   if (infoEl) infoEl.textContent = '⏳ Memuat soal...';
   try {
-    const list = await apiFetch(`/soal?kelas=${activeKelasPretest}&mapel=${encodeURIComponent(activeMapelPretest)}`);
+    const { data, error } = await db
+      .from('soal_pretest').select('*')
+      .eq('kelas', activeKelasPretest)
+      .eq('mapel', activeMapelPretest)
+      .order('id');
+    if (error) throw error;
+
+    const list = (data || []).map(s => ({
+      id: s.id, kelas: s.kelas, mapel: s.mapel,
+      pertanyaan: s.pertanyaan,
+      a: s.opsi_a, b: s.opsi_b, c: s.opsi_c, d: s.opsi_d,
+      jawaban: s.jawaban
+    }));
     appData.soalPretest = list;
     renderSoalTable(list);
     if (infoEl) infoEl.textContent = list.length > 0
@@ -1181,13 +1194,20 @@ async function saveSoal() {
   const d = document.getElementById('s-d').value.trim();
   const jawaban    = document.getElementById('s-jawaban').value;
   if (!pertanyaan || !a || !b || !c || !d) { showToast('⚠️ Semua field harus diisi!'); return; }
+
   const editId = document.getElementById('edit-soal-id').value;
   try {
     if (editId) {
-      await apiFetch(`/soal/${editId}`, { method:'PUT', body:JSON.stringify({kelas,mapel,pertanyaan,a,b,c,d,jawaban}) });
+      const { error } = await db.from('soal_pretest').update({
+        kelas, mapel, pertanyaan, opsi_a: a, opsi_b: b, opsi_c: c, opsi_d: d, jawaban
+      }).eq('id', editId);
+      if (error) throw error;
       showToast('✅ Soal berhasil diperbarui!');
     } else {
-      await apiFetch('/soal', { method:'POST', body:JSON.stringify({kelas,mapel,pertanyaan,a,b,c,d,jawaban}) });
+      const { error } = await db.from('soal_pretest').insert({
+        kelas, mapel, pertanyaan, opsi_a: a, opsi_b: b, opsi_c: c, opsi_d: d, jawaban
+      });
+      if (error) throw error;
       showToast('✅ Soal berhasil ditambahkan!');
     }
     closeModal('modal-soal');
@@ -1197,7 +1217,8 @@ async function saveSoal() {
 async function deleteSoal(id) {
   if (!confirm('Yakin ingin menghapus soal ini?')) return;
   try {
-    await apiFetch(`/soal/${id}`, { method:'DELETE' });
+    const { error } = await db.from('soal_pretest').delete().eq('id', id);
+    if (error) throw error;
     showToast('🗑️ Soal berhasil dihapus!');
     loadAndRenderSoalTable();
   } catch (err) { showToast('❌ ' + err.message); }
@@ -1208,17 +1229,33 @@ async function deleteSoal(id) {
 // =============================================
 async function loadAndRenderSiswaTable() {
   try {
-    const list = await apiFetch('/siswa');
-    appData.dataSiswa = list;
-    document.getElementById('siswa-tbody').innerHTML = list.map((s, i) => `
+    const { data: list, error } = await db.from('siswa').select('*').order('nis');
+    if (error) throw error;
+    appData.dataSiswa = list || [];
+    document.getElementById('siswa-tbody').innerHTML = (list || []).map((s, i) => `
       <tr>
         <td>${i + 1}</td>
         <td><span class="tbl-nama">${s.nama}</span></td>
         <td><span class="badge">Kelas ${s.kelas}</span></td>
         <td>${s.nis}</td>
-        <td><span class="status-active">${s.aktif ? 'Aktif' : 'Nonaktif'}</span></td>
+        <td><span class="status-active">${s.aktif !== false ? 'Aktif' : 'Nonaktif'}</span></td>
       </tr>`).join('');
   } catch (err) { showToast('❌ Gagal memuat data siswa: ' + err.message); }
+}
+
+// =============================================
+// KELOLA PROFIL SEKOLAH (Admin)
+// =============================================
+async function saveProfilSekolah(formData) {
+  try {
+    const misiStr      = Array.isArray(formData.misi) ? formData.misi.join('\n') : formData.misi;
+    const fasilitasStr = Array.isArray(formData.fasilitas) ? formData.fasilitas.join(',') : formData.fasilitas;
+    const { error } = await db.from('profil_sekolah').upsert({
+      id: 1, ...formData, misi: misiStr, fasilitas: fasilitasStr, updated_at: new Date()
+    });
+    if (error) throw error;
+    showToast('✅ Profil sekolah berhasil diperbarui!');
+  } catch (err) { showToast('❌ ' + err.message); }
 }
 
 // =============================================
