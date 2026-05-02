@@ -1276,3 +1276,48 @@ function showToast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.add('hidden'), 3000);
 }
+
+// =============================================
+// EXPOSE FUNGSI KE GLOBAL (wajib karena pakai module)
+// =============================================
+window.doLogin            = doLogin;
+window.doLogout           = doLogout;
+window.selectRole         = selectRole;
+window.togglePw           = togglePw;
+window.showModalLupa      = showModalLupa;
+window.submitLupaPassword = submitLupaPassword;
+window.goToLogin          = goToLogin;
+window.showSiswaSection   = showSiswaSection;
+window.toggleMobileNav    = toggleMobileNav;
+window.openMateri         = openMateri;
+window.filterKelas        = filterKelas;
+window.openDetailMateri   = openDetailMateri;
+window.openBahan          = openBahan;
+window.showKelasGrid      = showKelasGrid;
+window.loadPretestSoal    = loadPretestSoal;
+window.startPretest       = startPretest;
+window.pilihJawaban       = pilihJawaban;
+window.prevSoal           = prevSoal;
+window.nextSoal           = nextSoal;
+window.submitPretest      = submitPretest;
+window.togglePembahasan   = togglePembahasan;
+window.retryPretest       = retryPretest;
+window.backToPretest      = backToPretest;
+window.confirmResetProgress = confirmResetProgress;
+window.showAdminSection   = showAdminSection;
+window.toggleSidebar      = toggleSidebar;
+window.switchKelasMateri  = switchKelasMateri;
+window.switchMapelMateri  = switchMapelMateri;
+window.openModalMateri    = openModalMateri;
+window.editMateri         = editMateri;
+window.deleteMateri       = deleteMateri;
+window.addBahan           = addBahan;
+window.saveMateri         = saveMateri;
+window.switchKelasPretest = switchKelasPretest;
+window.switchMapelPretest = switchMapelPretest;
+window.openModalSoal      = openModalSoal;
+window.editSoal           = editSoal;
+window.deleteSoal         = deleteSoal;
+window.saveSoal           = saveSoal;
+window.closeModal         = closeModal;
+window.copyResetLink      = copyResetLink;
