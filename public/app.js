@@ -8,7 +8,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 // Ganti dengan nilai dari dashboard Supabase Anda
 // Settings → API → Project URL & anon public key
 const SUPABASE_URL  = 'https://xxedhgsrelrzqukgwajm.supabase.co';
-const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh4ZWRoZ3NyZWxyenF1a2d3YWptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0NTM5MjIsImV4cCI6MjA5MjAyOTkyMn0.Lp_InMxY8b4W_LAKbojEHfZKNBFkCl3ILFARSQlouGo'; // anon/public key
+const SUPABASE_ANON = 'sb_publishable_6oAKljBLU2yq9m5neq8-NA_-d4_oAb3'; // anon/public key
 
 const db = createClient(SUPABASE_URL, SUPABASE_ANON);
 
@@ -97,9 +97,8 @@ async function doLogin() {
 
     if (error || !user) throw new Error('Username atau password salah');
 
-    // Verifikasi password menggunakan bcryptjs di browser
-    const bcrypt = await import('https://cdn.jsdelivr.net/npm/bcryptjs@2.4.3/+esm');
-    const valid  = await bcrypt.compare(password, user.password_hash);
+    // Verifikasi password (plain text)
+    const valid = user.password_hash === password;
     if (!valid) throw new Error('Username atau password salah');
 
     if (user.role !== selectedRole) {
@@ -1276,48 +1275,3 @@ function showToast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.add('hidden'), 3000);
 }
-
-// =============================================
-// EXPOSE FUNGSI KE GLOBAL (wajib karena pakai module)
-// =============================================
-window.doLogin            = doLogin;
-window.doLogout           = doLogout;
-window.selectRole         = selectRole;
-window.togglePw           = togglePw;
-window.showModalLupa      = showModalLupa;
-window.submitLupaPassword = submitLupaPassword;
-window.goToLogin          = goToLogin;
-window.showSiswaSection   = showSiswaSection;
-window.toggleMobileNav    = toggleMobileNav;
-window.openMateri         = openMateri;
-window.filterKelas        = filterKelas;
-window.openDetailMateri   = openDetailMateri;
-window.openBahan          = openBahan;
-window.showKelasGrid      = showKelasGrid;
-window.loadPretestSoal    = loadPretestSoal;
-window.startPretest       = startPretest;
-window.pilihJawaban       = pilihJawaban;
-window.prevSoal           = prevSoal;
-window.nextSoal           = nextSoal;
-window.submitPretest      = submitPretest;
-window.togglePembahasan   = togglePembahasan;
-window.retryPretest       = retryPretest;
-window.backToPretest      = backToPretest;
-window.confirmResetProgress = confirmResetProgress;
-window.showAdminSection   = showAdminSection;
-window.toggleSidebar      = toggleSidebar;
-window.switchKelasMateri  = switchKelasMateri;
-window.switchMapelMateri  = switchMapelMateri;
-window.openModalMateri    = openModalMateri;
-window.editMateri         = editMateri;
-window.deleteMateri       = deleteMateri;
-window.addBahan           = addBahan;
-window.saveMateri         = saveMateri;
-window.switchKelasPretest = switchKelasPretest;
-window.switchMapelPretest = switchMapelPretest;
-window.openModalSoal      = openModalSoal;
-window.editSoal           = editSoal;
-window.deleteSoal         = deleteSoal;
-window.saveSoal           = saveSoal;
-window.closeModal         = closeModal;
-window.copyResetLink      = copyResetLink;
