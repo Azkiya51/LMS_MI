@@ -2,8 +2,7 @@
 // app.js — MadrasahKu (Supabase Direct, tanpa server.js)
 // =============================================
 
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
-
+const { createClient } = supabase;
 // ===== KONFIGURASI SUPABASE =====
 // Ganti dengan nilai dari dashboard Supabase Anda
 // Settings → API → Project URL & anon public key
