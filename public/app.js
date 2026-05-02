@@ -1,5 +1,5 @@
 // ===== KONFIGURASI API =====
-const API_BASE = 'https://madrasahku-topaz.vercel.app/';
+const API_BASE = 'https://madrasahku-topaz.vercel.app/api';
 
 // ===== APP STATE =====
 let appData = {
