@@ -8,7 +8,7 @@ import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 // Ganti dengan nilai dari dashboard Supabase Anda
 // Settings → API → Project URL & anon public key
 const SUPABASE_URL  = 'https://xxedhgsrelrzqukgwajm.supabase.co';
-const SUPABASE_ANON = 'sb_publishable_6oAKljBLU2yq9m5neq8-NA_-d4_oAb3'; // anon/public key
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh4ZWRoZ3NyZWxyenF1a2d3YWptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0NTM5MjIsImV4cCI6MjA5MjAyOTkyMn0.Lp_InMxY8b4W_LAKbojEHfZKNBFkCl3ILFARSQlouGo'; // anon/public key
 
 const db = createClient(SUPABASE_URL, SUPABASE_ANON);
 
